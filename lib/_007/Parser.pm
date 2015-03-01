@@ -6,6 +6,9 @@ class X::String::Newline is Exception {
 class X::PointyBlock::SinkContext is Exception {
 }
 
+class X::Trait::Conflict is Exception {
+}
+
 class OpLevel {
     has %.ops =
         prefix => {},
@@ -136,7 +139,7 @@ class Parser {
             }
             <.newpad>
             '(' ~ ')' <parameters>
-            <trait>*
+            <trait> *
             <blockoid>:!s
             <.finishpad>
         }
