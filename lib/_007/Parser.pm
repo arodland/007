@@ -51,6 +51,7 @@ class OpLevel {
     has %.ops =
         prefix => {},
         infix => {},
+        postfix => {},
     ;
 
     has @.infixprec;
@@ -89,12 +90,17 @@ class OpLevel {
         $prec.ops{$op} = $q;
     }
 
+    method add-postfix($op, $q) {
+        %!ops<postfix>{$op} = $q;
+        @!prepostfixprec.push($q);
+    }
+
     method clone {
         my $opl = OpLevel.new(
             infixprec => @.infixprec.map(*.clone),
             prepostfixprec => @.prepostfixprec.clone,
         );
-        for <prefix infix> -> $category {
+        for <prefix infix postfix> -> $category {
             for %.ops{$category}.kv -> $op, $q {
                 $opl.ops{$category}{$op} = $q;
             }
@@ -302,9 +308,20 @@ class Parser {
             return /<!>/(self);
         }
 
-        token postfix {
-            | $<index>=[ \s* '[' ~ ']' [\s* <EXPR>] ]
-            | $<call>=[ \s* '(' ~ ')' [\s* <arguments>] ]
+        method postfix {
+            # XXX: should find a way not to special-case [] and ()
+            if /$<index>=[ \s* '[' ~ ']' [\s* <EXPR>] ]/(self) -> $cur {
+                return $cur."!reduce"("postfix");
+            }
+            elsif /$<call>=[ \s* '(' ~ ')' [\s* <arguments>] ]/(self) -> $cur {
+                return $cur."!reduce"("postfix");
+            }
+
+            my @ops = $*parser.oplevel.ops<postfix>.keys;
+            if /@ops/(self) -> $cur {
+                return $cur."!reduce"("postfix");
+            }
+            return /<!>/(self);
         }
 
         token identifier {
@@ -464,6 +481,11 @@ class Parser {
                     $assoc //= "left";
                     $*parser.oplevel.add-prefix($op, Q::Prefix::Custom["$op"], :$assoc);
                 }
+                elsif $s ~~ /'postfix:<' (<-[>]>+) '>'/ {
+                    my $op = ~$0;
+                    $assoc //= "left";
+                    $*parser.oplevel.add-postfix($op, Q::Postfix::Custom["$op"], :$assoc);
+                }
             }($identifier.name);
         }
 
@@ -603,8 +625,11 @@ class Parser {
                     my $qtree = $*runtime.call($macro, @args);
                     make $qtree;
                 }
-                else {
+                elsif @p >= 2 {
                     make @p[0].new($/.ast, @p[1]);
+                }
+                else {
+                    make $postfix.ast.new($/.ast);
                 }
             }
             for $<prefix>.list -> $prefix {
@@ -654,8 +679,11 @@ class Parser {
             if $<index> {
                 make [Q::Postfix::Index, $<EXPR>.ast];
             }
-            else {
+            elsif $<call> {
                 make [Q::Postfix::Call, $<arguments>.ast];
+            }
+            else {
+                make $*parser.oplevel.ops<postfix>{~$/};
             }
         }
 
